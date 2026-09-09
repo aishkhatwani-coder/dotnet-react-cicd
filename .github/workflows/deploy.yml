@@ -1,0 +1,54 @@
+name: CI/CD GitHub Actions Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 1. Checkout Code
+      uses: actions/checkout@v4
+
+    - name: 2. Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: 3. Build & Test
+      run: |
+        dotnet restore BackendApp/BackendApp.csproj
+        dotnet build BackendApp/BackendApp.csproj --configuration Release --no-restore
+
+    - name: 4. Setup SSH via Jump Server
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        cat >> ~/.ssh/config <<EOF
+        Host jump
+          HostName ${{ secrets.JUMP_HOST }}
+          User ${{ secrets.SERVER_USER }}
+          IdentityFile ~/.ssh/id_rsa
+          StrictHostKeyChecking no
+
+        Host target
+          HostName ${{ secrets.TARGET_HOST }}
+          User ${{ secrets.SERVER_USER }}
+          IdentityFile ~/.ssh/id_rsa
+          ProxyJump jump
+          StrictHostKeyChecking no
+        EOF
+
+    - name: 5. Check Database on Server 1
+      run: |
+        ssh target "sudo systemctl is-active postgresql"
+
+    - name: 6. Deploy to Server 1
+      run: |
+        ssh target "mkdir -p ~/published-app-actions"
+        scp -r BackendApp/* target:~/published-app-actions/
+        echo "GitHub Actions Deployment Successful!"
