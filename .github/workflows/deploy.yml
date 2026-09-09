@@ -20,8 +20,25 @@ jobs:
 
     - name: 3. Build & Test
       run: |
-        dotnet restore BackendApp/BackendApp.csproj
-        dotnet build BackendApp/BackendApp.csproj --configuration Release --no-restore
+        dotnet restore BackendApp/BackendApp.csproj- name: 4. Setup SSH via Jump Server
+      run: |
+        mkdir -p ~/.ssh
+        printf "%s\n" "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        cat >> ~/.ssh/config <<EOF
+        Host jump
+          HostName ${{ secrets.JUMP_HOST }}
+          User ${{ secrets.SERVER_USER }}
+          IdentityFile ~/.ssh/id_rsa
+          StrictHostKeyChecking no
+
+        Host target
+          HostName ${{ secrets.TARGET_HOST }}
+          User ${{ secrets.SERVER_USER }}
+          IdentityFile ~/.ssh/id_rsa
+          ProxyJump jump
+          StrictHostKeyChecking no
+        EOF       dotnet build BackendApp/BackendApp.csproj --configuration Release --no-restore
 
     - name: 4. Setup SSH via Jump Server
       run: |
