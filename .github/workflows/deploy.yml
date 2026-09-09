@@ -32,11 +32,5 @@ jobs:
         printf "%s\n" "$SSH_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
-        ssh -o StrictHostKeyChecking=no $USER@$JUMP_HOST << 'CMD'
-          echo "Checking PostgreSQL on Server 1..."
-          ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "sudo systemctl is-active postgresql"
-
-          echo "Pulling latest code and deploying on Server 1..."
-          ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "cd ~/my-app && git pull origin main"
-          echo "Deployment successful via GitHub Actions!"
-CMD
+        ssh -o StrictHostKeyChecking=no $USER@$JUMP_HOST "ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 'sudo systemctl is-active postgresql && cd ~/my-app && git pull origin main'"
+        echo "Deployment successful via GitHub Actions!"
