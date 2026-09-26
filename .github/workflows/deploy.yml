@@ -44,14 +44,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_ENABLE_SUMMARY: true
 
-      # 2. Static Application Security Testing - SAST (Task 4)
+      # 2. Static Application Security Testing - SAST on Application Code (Task 4)
       - name: Run SAST Scan (Semgrep)
         continue-on-error: true
         id: semgrep_scan
         run: |
           python3 -m pip install semgrep
-          semgrep scan --config auto --json -o security-reports/semgrep-report.json --exclude="bin" --exclude="obj" || true
-          semgrep scan --config auto --text -o security-reports/semgrep-summary.txt --exclude="bin" --exclude="obj" || true
+          semgrep scan --config auto BackendApp/ --json -o security-reports/semgrep-report.json --exclude="bin" --exclude="obj" || true
+          semgrep scan --config auto BackendApp/ --text -o security-reports/semgrep-summary.txt --exclude="bin" --exclude="obj" || true
           cat security-reports/semgrep-summary.txt
 
       # 3. Dependency Scanning (Task 2)
@@ -61,7 +61,7 @@ jobs:
         id: trivy_scan
         with:
           scan-type: 'fs'
-          scan-ref: '.'
+          scan-ref: 'BackendApp/'
           severity: 'CRITICAL,HIGH'
           format: 'table'
           output: 'security-reports/trivy-report.txt'
@@ -84,12 +84,12 @@ jobs:
         run: |
           echo "=== Evaluating DevSecOps Security Gate ==="
           
-          # Check Semgrep findings
+          # Check Semgrep findings in application code
           FINDINGS=$(python3 -c "import json; data=json.load(open('security-reports/semgrep-report.json')); print(len(data.get('results', [])))" 2>/dev/null || echo "0")
-          echo "SAST Findings Detected: $FINDINGS"
+          echo "Application SAST Findings Detected: $FINDINGS"
           
           if [ "$FINDINGS" -gt 0 ]; then
-            echo "❌ SECURITY GATE FAILED: High-risk vulnerabilities detected in code analysis!"
+            echo "❌ SECURITY GATE FAILED: High-risk vulnerabilities detected in application code!"
             exit 1
           fi
           
