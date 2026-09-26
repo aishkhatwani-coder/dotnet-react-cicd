@@ -1,4 +1,4 @@
-name: CI/CD GitHub Actions Pipeline
+name: CI/CD GitHub Actions Pipeline with DevSecOps
 
 on:
   push:
@@ -6,42 +6,78 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
+  build:
+    name: 1. Build Application
     runs-on: ubuntu-latest
-
     steps:
-    - name: 1. Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: 2. Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '8.0.x'
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
 
-    - name: 3. Build Code
-      run: |
-        dotnet build BackendApp/BackendApp.csproj --configuration Release
+      - name: Build BackendApp
+        run: |
+          dotnet build BackendApp/BackendApp.csproj --configuration Release
 
-    - name: 4. Deploy via Jump Server
-      env:
-        SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        JUMP_HOST: ${{ secrets.JUMP_HOST }}
-        USER: ${{ secrets.SERVER_USER }}
-      run: |
-        mkdir -p ~/.ssh
-        printf "%s\n" "$SSH_KEY" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
+  security-scan:
+    name: 2. Security Stage (Secret, SAST & Dependency)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code (Full History for Secret Scan)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-        # Start ssh-agent and add key for forwarding
-        eval $(ssh-agent -s)
-        ssh-add ~/.ssh/id_rsa
+      # 1. Secret Detection (Task 3)
+      - name: Run Secret Scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-        # Connect using agent forwarding (-A) so Server 2 can authenticate to Server 1
-        ssh -A -o StrictHostKeyChecking=no $USER@$JUMP_HOST << 'EOF'
-          echo "Checking PostgreSQL on Server 1..."
-          ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "sudo systemctl is-active postgresql"
+      # 2. Static Application Security Testing - SAST (Task 4)
+      - name: Run SAST Scan (Semgrep)
+        run: |
+          python3 -m pip install semgrep
+          semgrep scan --config auto --error --exclude="bin" --exclude="obj"
 
-          echo "Pulling latest code and deploying on Server 1..."
-          ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "cd ~/my-app && git pull origin main"
-          echo "Deployment successful via GitHub Actions!"
-        EOF
+      # 3. Dependency Scanning (Task 2)
+      - name: Run Dependency Vulnerability Scan (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+
+  deploy:
+    name: 3. Security Gate & EC2 Deployment
+    needs: security-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via Jump Server
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          JUMP_HOST: ${{ secrets.JUMP_HOST }}
+          USER: ${{ secrets.SERVER_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          printf "%s\n" "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # Start ssh-agent and add key for forwarding
+          eval $(ssh-agent -s)
+          ssh-add ~/.ssh/id_rsa
+
+          # Connect using agent forwarding (-A) so Server 2 can authenticate to Server 1
+          ssh -A -o StrictHostKeyChecking=no $USER@$JUMP_HOST << 'EOF'
+            echo "Checking PostgreSQL on Server 1..."
+            ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "sudo systemctl is-active postgresql"
+
+            echo "Pulling latest code and deploying on Server 1..."
+            ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "cd ~/my-app && git pull origin main"
+            echo "Deployment successful via GitHub Actions!"
+          EOF
