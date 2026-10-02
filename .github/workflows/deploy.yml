@@ -1,123 +1,27 @@
-name: CI/CD GitHub Actions Pipeline with DevSecOps
+name: Node.js CI Pipeline
 
 on:
   push:
     branches: [ "main" ]
-  workflow_dispatch:
+  pull_request:
+    branches: [ "main" ]
 
 jobs:
-  build:
-    name: 1. Build Application
+  build-and-test:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
 
-      - name: Build BackendApp
-        run: |
-          dotnet build BackendApp/BackendApp.csproj --configuration Release
+    - name: Install Dependencies
+      run: npm install
 
-  security-scan:
-    name: 2. Security Stage (Secret, SAST & Dependency)
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code (Full History for Secret Scan)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create Reports Directory
-        run: mkdir -p security-reports
-
-      # 1. Secret Detection (Task 3)
-      - name: Run Secret Scan (Gitleaks)
-        uses: gitleaks/gitleaks-action@v2
-        continue-on-error: true
-        id: gitleaks_scan
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_ENABLE_SUMMARY: true
-
-      # 2. Static Application Security Testing - SAST on Application Code (Task 4)
-      - name: Run SAST Scan (Semgrep)
-        continue-on-error: true
-        id: semgrep_scan
-        run: |
-          python3 -m pip install semgrep
-          semgrep scan --config auto BackendApp/ --json -o security-reports/semgrep-report.json --exclude="bin" --exclude="obj" || true
-          semgrep scan --config auto BackendApp/ --text -o security-reports/semgrep-summary.txt --exclude="bin" --exclude="obj" || true
-          cat security-reports/semgrep-summary.txt
-
-      # 3. Dependency Scanning (Task 2)
-      - name: Run Dependency Vulnerability Scan (Trivy)
-        uses: aquasecurity/trivy-action@master
-        continue-on-error: true
-        id: trivy_scan
-        with:
-          scan-type: 'fs'
-          scan-ref: 'BackendApp/'
-          severity: 'CRITICAL,HIGH'
-          format: 'table'
-          output: 'security-reports/trivy-report.txt'
-
-      - name: Print Dependency Report
-        run: |
-          if [ -f security-reports/trivy-report.txt ]; then
-            cat security-reports/trivy-report.txt
-          fi
-
-      # Upload Artifacts (Deliverable: Security Scan Reports)
-      - name: Upload Security Scan Reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-scan-reports
-          path: security-reports/
-
-      # Security Gate Evaluation (Task 5)
-      - name: Evaluate Security Gate
-        run: |
-          echo "=== Evaluating DevSecOps Security Gate ==="
-          FINDINGS=$(python3 -c "import json; data=json.load(open('security-reports/semgrep-report.json')); print(len(data.get('results', [])))" 2>/dev/null || echo "0")
-          echo "Application SAST Findings Detected: $FINDINGS"
-          
-          if [ "$FINDINGS" -gt 0 ]; then
-            echo "❌ SECURITY GATE FAILED: High-risk vulnerabilities detected in application code!"
-            exit 1
-          fi
-          
-          echo "✅ SECURITY GATE PASSED: All security checks satisfied."
-
-  deploy:
-    name: 3. Security Gate & EC2 Deployment
-    needs: security-scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy via Jump Server
-        env:
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          JUMP_HOST: ${{ secrets.JUMP_HOST }}
-          USER: ${{ secrets.SERVER_USER }}
-        run: |
-          echo "✅ Security Gate passed successfully. Deployment authorized."
-          
-          mkdir -p ~/.ssh
-          printf "%s\n" "$SSH_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-
-          eval $(ssh-agent -s)
-          ssh-add ~/.ssh/id_rsa
-
-          ssh -A -o StrictHostKeyChecking=no -o ConnectTimeout=5 $USER@$JUMP_HOST << 'EOF' || echo "Jump Server offline. Gate verified; simulated deployment complete."
-            echo "Checking PostgreSQL on Server 1..."
-            ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "sudo systemctl is-active postgresql" || true
-
-            echo "Pulling latest code and deploying on Server 1..."
-            ssh -o StrictHostKeyChecking=no ubuntu@10.0.0.19 "cd ~/my-app && git pull origin main" || true
-          EOF
-          echo "✅ Deployment completed successfully via GitHub Actions!"
+    - name: Run Unit Tests
+      run: npm test
